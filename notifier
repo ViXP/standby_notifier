@@ -1,0 +1,153 @@
+#!/usr/bin/env ruby
+require 'net/http'
+require 'net/smtp'
+require 'uri'
+require 'optparse'
+
+# Notifier configuration:
+SITES = %i[https://somesite.com https://somesite.com] # sites to monitor
+MAIL_TO = 'some@mail.co' # email address for notifications
+
+#-------------------------------------------------------------------------------
+# => Working classes
+#-------------------------------------------------------------------------------
+# The main StandbyNotifier class
+class StandbyNotifier
+  # Configurable constants
+  CHECKING_INTERVAL = 60 # in seconds
+  REQUEST_TIMEOUT = 15 # in seconds
+
+  attr_reader :url
+
+  def initialize(url)
+    @site_available = true
+    @url = url.to_s
+    try
+  end
+
+  def try
+    fetch
+    sleep CHECKING_INTERVAL
+    try
+  end
+
+  def notify(respn = false)
+    @site_available = false
+    status = respn ? "#{respn.message} -- #{respn.code}" : 'Connection error'
+    EmailSender.send_mail <<~MESSAGE
+      #{Time.now.strftime('%c')} - #{url} IS UNREACHABLE! (#{status})
+    MESSAGE
+  end
+
+  private
+
+  def fetch
+    uri = URI.parse(url)
+    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true,
+      read_timeout: REQUEST_TIMEOUT) {|r| r.get uri.to_s }
+    raise StandardError unless response.code == '200'
+    @site_available = true
+  rescue
+    return false unless @site_available
+    notify response
+  end
+end
+
+# Email sending class
+class EmailSender
+  # Configurable constants
+  SENDING_OPTS = {
+    mail_to: MAIL_TO,
+    mail_from: 'emailstandbynotifier@gmail.com',
+    sender_name: 'Email Standy Notifier',
+    domain: 'localhost',
+    smtp_server: 'smtp.gmail.com', port: 587,
+    user_name: 'emailstandbynotifier',
+    password: 'SomePassword123'
+  }
+
+  def self.send_mail(body)
+    # It is better to use forks for async operations, but its implementation is
+    # limited by the interpreter version (in ex. JRuby is not supporting it)
+    (Thread.new do
+      connect = Net::SMTP.new(SENDING_OPTS[:smtp_server], SENDING_OPTS[:port])
+      connect.enable_starttls
+      connect.start(SENDING_OPTS[:domain], SENDING_OPTS[:user_name],
+                    SENDING_OPTS[:password], :plain) do |s|
+          s.send_message prepare_mail(body), SENDING_OPTS[:mail_from],
+                         SENDING_OPTS[:mail_to]
+        end
+    end).join
+  end
+
+  private
+
+  def self.prepare_mail(body)
+    <<~MESSAGE
+      From: #{SENDING_OPTS[:sender_name]} <#{SENDING_OPTS[:mail_from]}>
+      To: <#{SENDING_OPTS[:mail_to]}>
+      Date: #{Time.now.strftime('%c')}
+      Subject: Alert! Your site is unreachable!
+
+      #{body}
+    MESSAGE
+  end
+end
+
+# Process controlling class
+class ProcessControl
+  @pidfile = 'process.pid'
+  @daemonize = true
+
+  def self.run!
+    parse_args
+    handle_pid
+  end
+
+  def self.stop!
+    parse_args
+    kill_remove_pid
+    exit
+  end
+
+  private
+
+  def self.parse_args
+    OptionParser.new do |options|
+      options.on('-p', '--pid Pidfile', String, 'Pidfile') {|v| @pidfile = v }
+      options.on('--nd', 'Not daemonize option') {|v| @daemonize = !v}
+    end.parse!
+  end
+
+  def self.handle_pid
+    Process.daemon(true, true) if @daemonize
+    kill_remove_pid
+    File.open(@pidfile, 'w') {|f| f.write(Process.pid.to_s) }
+  end
+
+  def self.kill_remove_pid
+    return true unless File.exists? @pidfile
+    pid = File.open(@pidfile, 'r') {|f| pid = f.read.to_i}
+    File.delete @pidfile
+    Process.kill(0, pid) if @daemonize
+  rescue Errno::ESRCH
+    true
+  end
+end
+
+#-------------------------------------------------------------------------------
+# => Program running
+#-------------------------------------------------------------------------------
+# Process setting up
+if ARGV.include? 'stop'
+  ProcessControl.stop!
+else
+  ProcessControl.run!
+end
+
+# Using the thread for every site
+sites = []
+SITES.each do |site|
+  sites << Thread.new { StandbyNotifier.new(site) }
+end
+sites.each {|t| t.join}

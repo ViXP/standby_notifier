@@ -1,0 +1,12 @@
+echo 'Copying the init file...'
+rm ~/Library/LaunchAgents/com.standbynotifier.app.plist
+cp ./MacOS/com.standbynotifier.app.plist \
+  ~/Library/LaunchAgents/com.standbynotifier.app.plist
+
+sed -i -e "s#{APP_PATH}#`pwd`/notifier#g" \
+  ~/Library/LaunchAgents/com.standbynotifier.app.plist
+
+echo 'Starting the service...'
+launchctl unload ~/Library/LaunchAgents/com.standbynotifier.app.plist
+launchctl load -w ~/Library/LaunchAgents/com.standbynotifier.app.plist
+launchctl start com.standbynotifier.app

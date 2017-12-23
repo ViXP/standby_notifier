@@ -1,0 +1,21 @@
+#!/bin/sh
+PIDFILE="${NOTIFIER_PATH}/notifier.pid"
+EXECUTABLE="${NOTIFIER_PATH}/notifier"
+
+case "$1" in
+  start)
+    ${EXECUTABLE} start -p $PIDFILE
+  ;;
+  restart)
+    ${EXECUTABLE} restart -p $PIDFILE
+  ;;
+  stop)
+    ${EXECUTABLE} stop -p $PIDFILE
+  ;;
+  *)
+    echo "Please, specify the required action (start, stop, restart)"
+    exit 1
+  ;;
+esac
+
+exit 0

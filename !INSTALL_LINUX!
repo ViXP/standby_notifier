@@ -1,0 +1,23 @@
+if ! hash ruby 2>/dev/null
+then
+  echo 'Installing the Ruby standard interpreter...'
+  apt-get install -y ruby
+fi
+
+echo 'Creating the init file...'
+if [ -f /etc/init.d/standbynotifier ]
+then
+  rm /etc/init.d/standbynotifier
+fi
+touch /etc/init.d/standbynotifier
+printf "#!/bin/sh\nNOTIFIER_PATH=`pwd`\n" | cat - ./Linux/notifier_init | \
+  tee -a /etc/init.d/standbynotifier
+chmod +x /etc/init.d/standbynotifier
+
+echo 'Adding the init file as service...'
+update-rc.d standbynotifier defaults
+systemctl daemon-reload
+
+echo 'Starting the service...'
+service standbynotifier restart
+service --status-all | grep standbynotifier
